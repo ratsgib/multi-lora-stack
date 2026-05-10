@@ -20,6 +20,35 @@ async function getAvailableLoras() {
     }
 }
 
+function normalizeLoraItem(item) {
+    return {
+        on: item?.on ?? true,
+        lora: item?.lora ?? "None",
+        strength: Number(item?.strength ?? 1.0),
+    };
+}
+
+function parseSavedLoraStack(node) {
+    const stackWidget = node.widgets?.find((w) => w.name === "lora_stack");
+
+    if (!stackWidget || !stackWidget.value) {
+        return [];
+    }
+
+    try {
+        const parsed = JSON.parse(stackWidget.value);
+
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+
+        return parsed.map(normalizeLoraItem);
+    } catch (error) {
+        console.warn("Failed to parse saved lora_stack:", stackWidget.value, error);
+        return [];
+    }
+}
+
 app.registerExtension({
     name: "MultiLoRAStack",
     
@@ -40,6 +69,9 @@ app.registerExtension({
                 this.loraData = [];
                 this.availableLoras = await getAvailableLoras();
                 
+                // Read saved JSON before adding visual LoRA rows.
+                const savedLoras = parseSavedLoraStack(this);
+
                 // Add control buttons
                 this.addWidget("button", "➕ Add LoRA", null, () => {
                     this.addLoRA();
@@ -49,38 +81,41 @@ app.registerExtension({
                     this.toggleAllLoRAs();
                 });
                 
-                // Add initial LoRA
-                this.addLoRA();
-                
+                // Restore saved LoRAs. If nothing was saved, add one empty row.
+                if (savedLoras.length > 0) {
+                    for (const saved of savedLoras) {
+                        this.addLoRA(saved);
+                    }
+                } else {
+                    this.addLoRA();
+                }
                 return result;
             };
             
             // Add methods to the node prototype
-            nodeType.prototype.addLoRA = function() {
+            nodeType.prototype.addLoRA = function (initialData = null) {
                 const index = this.loraData.length;
                 console.log(`Adding LoRA ${index + 1}`);
                 
+                const data = normalizeLoraItem(initialData);
+
                 // Add LoRA data
-                this.loraData.push({
-                    on: true,
-                    lora: "None",
-                    strength: 1.0
-                });
+                this.loraData.push(data);
                 
                 // Create widgets for this LoRA
-                const enableWidget = this.addWidget("toggle", `Enable LoRA ${index + 1}`, true, (value) => {
+                const enableWidget = this.addWidget("toggle", `Enable LoRA ${index + 1}`,data.on, (value) => {
                     this.loraData[index].on = value;
                     this.updateLoraStack();
                 });
                 
-                const loraWidget = this.addWidget("combo", `LoRA ${index + 1}`, "None", (value) => {
+                const loraWidget = this.addWidget("combo", `LoRA ${index + 1}`, data.lora, (value) => {
                     this.loraData[index].lora = value;
                     this.updateLoraStack();
                 }, {
                     values: this.availableLoras
                 });
                 
-                const strengthWidget = this.addWidget("number", `Strength ${index + 1}`, 1.0, (value) => {
+                const strengthWidget = this.addWidget("number", `Strength ${index + 1}`, data.strength, (value) => {
                     this.loraData[index].strength = value;
                     this.updateLoraStack();
                 }, {
@@ -98,7 +133,7 @@ app.registerExtension({
                     enable: enableWidget,
                     lora: loraWidget,
                     strength: strengthWidget,
-                    remove: removeWidget
+                    remove: removeWidget,
                 };
                 
                 this.updateLoraStack();
@@ -112,7 +147,7 @@ app.registerExtension({
                 const loraItem = this.loraData[index];
                 if (loraItem && loraItem._widgets) {
                     // Remove widgets from the node
-                    Object.values(loraItem._widgets).forEach(widget => {
+                    Object.values(loraItem._widgets).forEach((widget) => {
                         const widgetIndex = this.widgets.indexOf(widget);
                         if (widgetIndex !== -1) {
                             this.widgets.splice(widgetIndex, 1);
@@ -142,12 +177,12 @@ app.registerExtension({
             };
             
             nodeType.prototype.toggleAllLoRAs = function() {
-                const allEnabled = this.loraData.every(lora => lora.on);
+                const allEnabled = this.loraData.every((lora) => lora.on);
                 const newState = !allEnabled;
                 
                 console.log(`Toggling all LoRAs to:`, newState);
                 
-                this.loraData.forEach((loraItem, index) => {
+                this.loraData.forEach((loraItem) => {
                     loraItem.on = newState;
                     if (loraItem._widgets && loraItem._widgets.enable) {
                         loraItem._widgets.enable.value = newState;
